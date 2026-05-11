@@ -54,6 +54,10 @@ INSTALLED_APPS = [
    
    # local app
     "authentication",
+    'groups',   
+    'savings',  
+    'contributions',
+
 ]
 
 MIDDLEWARE = [
@@ -167,3 +171,27 @@ SPECTACULAR_SETTINGS = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True 
+
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    }
+}
+
+# twilio
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+
+# africa's talking
+AFRICATALKING_USERNAME = os.getenv("AFRICATALKING_USERNAME")
+AFRICATALKING_API_KEY = os.getenv("AFRICATALKING_API_KEY")
+
+# email settings
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = f'Smart Ajo <{os.getenv("EMAIL_HOST_USER")}>'

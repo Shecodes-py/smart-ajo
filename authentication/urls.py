@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import RegisterView, MeView, MyTokenObtainPairView, ProfileView, RiskProfileView
+from .views import RegisterView, MeView, MyTokenObtainPairView, ProfileView, RiskProfileView, VerifyOTPView, ResendOTPView
 
 # write your urls here
 urlpatterns = [
@@ -13,4 +13,7 @@ urlpatterns = [
     path('profile/', ProfileView.as_view(), name='profile'),
     path('me/', MeView.as_view()),                       
     path('risk/', RiskProfileView.as_view(), name='risk-profile'),
+
+    path('verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('resend-otp/', ResendOTPView.as_view(), name='resend-otp'),
 ]

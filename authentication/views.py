@@ -3,11 +3,16 @@ from rest_framework.generics import CreateAPIView, RetrieveUpdateAPIView, ListAP
 from rest_framework.permissions import IsAuthenticated, AllowAny 
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .utils import generate_otp, send_email_otp, store_otp, verify_otp
 from .serializers import RegisterSerializer, UserProfileSerializer, UpdateProfileSerializer, MyTokenObtainPairSerializer
 
 from django.contrib.auth import get_user_model
+import logging
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -29,11 +34,79 @@ class RegisterView(CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
+        # Generate and send OTP immediately after registration
+    
+        otp = generate_otp()
+        store_otp(user.email, otp)
+
+        try:
+            send_email_otp(user.email, otp)
+            message = "Account created. Check your email for the OTP."
+        except Exception as e:
+            print(f"OTP ERROR: {e}")
+            message = "Account created but email failed. Use /resend-otp/."
+
         return Response({
-            "message": "Account created successfully.",
+            "message": message,
+            "user_id": user.id,
+            "phone_number": user.phone_number,
             "user": self.get_serializer(user).data
         }, status=status.HTTP_201_CREATED)
     
+# POST /auth/verify-otp
+class VerifyOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        otp_input = request.data.get('otp')
+
+        if not email or not otp_input:
+            return Response(
+                {"error": "email and otp are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        is_valid, message = verify_otp(email, otp_input)
+        if not is_valid:
+            return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+            user.is_verified = True
+            user.save()
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({"message": message}, status=status.HTTP_200_OK)
+
+
+class ResendOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+
+        if not email:
+            return Response({"error": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.is_verified:
+            return Response({"message": "Account already verified."}, status=status.HTTP_200_OK)
+
+        otp = generate_otp()
+        store_otp(email, otp)
+
+        try:
+            send_email_otp(user.email, otp)
+            return Response({"message": "OTP resent. Check your email."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": "Failed to send OTP."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 # POST /auth/login
 

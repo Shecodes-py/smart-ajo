@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager, PermissionsMixin
+from django.utils import timezone
+import datetime
 
 # Create your models here.
 
@@ -34,19 +36,21 @@ class CustomUser(AbstractUser, PermissionsMixin):
 
     email = models.EmailField(unique=True, max_length=150)
     username = models.CharField(max_length=150, unique=True)
-
     full_name = models.CharField(max_length=150, blank=True)
-
+    phone_number = models.CharField(max_length=20, blank=True)
+        
+    # profile 
     display_name = models.CharField(max_length=150, blank=True)
     date_of_birth = models.DateField(null=True, blank=True, ) #related_name = "date_of_birth"
     nationality = models.CharField(max_length=100, blank=True)
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
 
-    phone_number = models.CharField(max_length=20, blank=True)
-    
     objects = CustomUserManager()
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ['username', 'phone_number' ]
+
+    # debit card details 
+
 
     # AI Risk fields
     risk_score = models.FloatField(default=0.0)  # 0-100
@@ -60,6 +64,7 @@ class CustomUser(AbstractUser, PermissionsMixin):
     date_joined = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=False) 
         
     def __str__(self):
         return f"{self.get_full_name()} ({self.phone_number})"
@@ -73,3 +78,12 @@ class CustomUser(AbstractUser, PermissionsMixin):
         else:
             self.risk_level = 'high'
         self.save()
+
+
+class OTP(models.Model):
+    phone_number = models.CharField(max_length=15)
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def is_expired(self):
+        return timezone.now() > self.created_at + datetime.timedelta(minutes=5)

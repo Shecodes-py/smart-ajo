@@ -30,7 +30,7 @@ urlpatterns = [
     path("", index, name ='index' ),
     path("api/auth/", include("authentication.urls")),
     # path("savings/", include("savings.urls")),
-    # path("groups/", include("groups.urls")),
+    path("api/groups/", include("groups.urls")),
 
     path("api-auth/", include("rest_framework.urls")),
 ]

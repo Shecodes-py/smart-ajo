@@ -34,6 +34,21 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User.objects.create_user(**validated_data)
         return user
     
+    def validate_phone_number(self, value):
+        value = value.strip().replace(' ', '').replace('-', '')
+        
+        if value.startswith('0'):
+            value = '+234' + value[1:]
+        
+        elif not value.startswith('+'):
+            value = '+234' + value
+        
+        if len(value) != 14:  # +234 + 10 digits
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number e.g. 08012345678"
+            )
+        return value
+    
 
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
