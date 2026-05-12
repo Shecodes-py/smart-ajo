@@ -38,13 +38,16 @@ class RegisterView(CreateAPIView):
     
         otp = generate_otp()
         store_otp(user.email, otp)
+        logging.info(f"Generated OTP for {user.email}: {otp}")  # Log the OTP for debugging (remove in production)
 
         try:
             send_email_otp(user.email, otp)
             message = "Account created. Check your email for the OTP."
+            logging.info(f"Sent OTP email to {user.email}")
         except Exception as e:
             print(f"OTP ERROR: {e}")
             message = "Account created but email failed. Use /resend-otp/."
+            logging.error(f"Failed to send OTP email to {user.email}: {e}")
 
         return Response({
             "message": message,
