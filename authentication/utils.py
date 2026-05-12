@@ -3,6 +3,7 @@ import string
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.conf import settings
+import resend
 
 import logging
 
@@ -12,18 +13,27 @@ def generate_otp(length=6):
     return ''.join(random.choices(string.digits, k=length))
 
 def send_email_otp(email, otp):
+    resend.api_key = settings.RESEND_API_KEY
+    
     subject = "Your Smart Ajo Verification Code"
-    message = (
-        f"Your Smart Ajo verification code is: {otp}\n\n"
-        f"Valid for 10 minutes. Do not share this code with anyone."
-    )
+    html_content = f"""
+        <p>Your Smart Ajo verification code is: <strong>{otp}</strong></p>
+        <p>Valid for 10 minutes. Do not share this code with anyone.</p>
+    """
+    
     try:
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email])
-        logger.info(f"Sent OTP email to {email}")
+        params = {
+            "from": "Smart Ajo <onboarding@resend.dev>",
+            "to": [email],
+            "subject": subject,
+            "html": html_content,
+        }
+        
+        resend.Emails.send(params)
+        return True
     except Exception as e:
-        logger.error(f"Failed to send OTP email to {email}: {e}")
-        raise e  # Re-raise the exception to be handled by the caller
-   
+        logger.error(f"Resend Error: {str(e)}")
+        return False
 
 def store_otp(email, otp, timeout=600):
     key = f'otp_{email}'

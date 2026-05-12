@@ -196,3 +196,5 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = f'Smart Ajo <{os.getenv("EMAIL_HOST_USER")}>'
 
+# resend settings
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
