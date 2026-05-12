@@ -81,7 +81,7 @@ class Membership(models.Model):
         ("private", "Private"),
         ("public", "Public"),
     )
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name = "memberships")
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='memberships')
     
     role = models.CharField(max_length=50, blank=True) # e.g., "admin", "member"
