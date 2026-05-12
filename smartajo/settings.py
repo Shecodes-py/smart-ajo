@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     'django_filters',
     'rest_framework_simplejwt',
     'drf_spectacular',
+    'cloudinary_storage',
+    'cloudinary',
    
    # local app
     "authentication",
@@ -198,3 +200,12 @@ DEFAULT_FROM_EMAIL = f'Smart Ajo <{os.getenv("EMAIL_HOST_USER")}>'
 
 # resend settings
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+
+# cloudinary settings
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': os.getenv("CLOUDINARY_CLOUD_NAME"),
+    'API_KEY': os.getenv("CLOUDINARY_API_KEY"),
+    'API_SECRET': os.getenv("CLOUDINARY_API_SECRET")
+}
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
