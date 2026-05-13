@@ -111,13 +111,10 @@ class ResendOTPView(APIView):
             return Response({"error": "Failed to send OTP."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# POST /auth/login
-
 # POST /auth/logout
 
 # POST /auth/forgot-password
  
-# POST /auth/verify-otp
 
 # POST /auth/reset-password
 

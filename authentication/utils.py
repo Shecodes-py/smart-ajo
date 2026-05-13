@@ -23,7 +23,7 @@ def send_email_otp(email, otp):
     
     try:
         params = {
-            "from": "Smart Ajo <onboarding@resend.dev>",
+            "from": settings.DEFAULT_FROM_EMAIL,
             "to": [email],
             "subject": subject,
             "html": html_content,
