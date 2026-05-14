@@ -45,7 +45,7 @@ class Group(models.Model):
     start_date = models.DateField(null=True, blank=True)
 
     total_cycles = models.PositiveIntegerField(default=0)
-    start_date = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
@@ -96,3 +96,15 @@ class Membership(models.Model):
 
     def __str__(self):
         return f"{self.user} in {self.group} (position {self.rotation_order})"
+
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+
+        # After saving a new member, check if the group is now full
+        if is_new:
+            group = self.group
+            if group.status == 'open' and group.total_members >= group.max_members:
+                group.status = 'active'
+                group.current_round = 1  # Initialize first round
+                group.save()

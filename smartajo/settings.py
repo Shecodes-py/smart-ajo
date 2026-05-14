@@ -60,6 +60,8 @@ INSTALLED_APPS = [
     'groups',   
     'savings',  
     'contributions',
+    'wallets',
+    'payments',   
 
 ]
 
@@ -214,6 +216,10 @@ DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 # squad api settings
 SQUAD_SECRET_KEY = os.getenv('SQUAD_SECRET_KEY')
 SQUAD_CALLBACK_URL = os.getenv('SQUAD_CALLBACK_URL')
+
+# Squad callbacks
+SQUAD_WALLET_CALLBACK_URL = os.getenv('SQUAD_WALLET_CALLBACK_URL')
+SQUAD_CARD_CALLBACK_URL = os.getenv('SQUAD_CARD_CALLBACK_URL')
 
 # Redis
 CELERY_BROKER_URL = os.getenv('REDIS_URL', default='redis://localhost:6379/0')

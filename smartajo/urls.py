@@ -31,6 +31,9 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls")),
     path("api/contributions/", include("contributions.urls")),
     path("api/groups/", include("groups.urls")),
+    # path("api/savings/", include("savings.urls")),
+    path("api/wallet/", include("wallets.urls")),
+    path("api/payments/", include("payments.urls")),
 
     path("api-auth/", include("rest_framework.urls")),
 ]

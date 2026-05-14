@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db import transaction
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -15,7 +16,8 @@ from .models import Contribution, Payout
 from .serializers import ContributionSerializer, PayoutSerializer
 from .risks import update_user_risk
 from .squad import initiate_payment, verify_payment
-
+from wallets.models import Wallet, WalletTransaction
+        
 # Create your views here.
 
 @extend_schema(
@@ -45,6 +47,7 @@ class InitiateContributionView(APIView):
 
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
+        method = request.query_params.get("method", "squad") 
 
         membership = Membership.objects.filter(
             user=request.user, group=group, is_active=True
@@ -93,6 +96,56 @@ class InitiateContributionView(APIView):
                 'status': 'pending'
             }
         )
+
+        if method == "squad":
+            result = initiate_payment(request.user, group, group.contribution_amount)
+            if not result['success']:
+                return Response({"error": result['error']}, status=502)
+            
+            # Create the pending record so the webhook has something to find
+            Contribution.objects.get_or_create(
+                user=request.user, group=group, round_number=group.current_round,
+                defaults={'amount': group.contribution_amount, 'due_date': timezone.now().date(), 'status': 'pending'}
+            )
+            return Response(result, status=200)
+
+        elif method == "wallet":
+            with transaction.atomic():
+                wallet = get_object_or_404(Wallet, user=request.user)
+                if wallet.balance < group.contribution_amount:
+                    return Response({"error": "Insufficient funds"}, status=400)
+                    
+                wallet.balance -= group.contribution_amount
+                wallet.save()
+
+
+        # Record wallet transaction
+        WalletTransaction.objects.create(
+            wallet=wallet,
+            type="contribution",
+            amount=group.contribution_amount,
+            status="success",
+            description=f"Contribution to {group.name} — Round {group.current_round}"
+        )
+
+        # Mark contribution as paid
+        contribution, _ = Contribution.objects.get_or_create(
+            user=request.user,
+            group=group,
+            round_number=group.current_round,
+            defaults={
+                'amount': group.contribution_amount,
+                'due_date': timezone.now().date(),
+                'status': 'pending'
+            }
+        )
+        contribution.status = 'paid'
+        contribution.paid_at = timezone.now()
+        contribution.save()
+
+        update_user_risk(request.user)
+        self._check_and_process_payout(group, group.current_round)
+
 
         return Response({
             "message": "Proceed to payment.",
