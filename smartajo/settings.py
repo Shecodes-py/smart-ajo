@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'cloudinary_storage',
     'cloudinary',
+    'django_celery_beat',
    
    # local app
     "authentication",
@@ -209,3 +210,24 @@ CLOUDINARY_STORAGE = {
 }
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
+# squad api settings
+SQUAD_SECRET_KEY = os.getenv('SQUAD_SECRET_KEY')
+SQUAD_CALLBACK_URL = os.getenv('SQUAD_CALLBACK_URL')
+
+# Redis
+CELERY_BROKER_URL = os.getenv('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_TIMEZONE = 'Africa/Lagos'
+
+# Celery Beat 
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Cache 
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', default='redis://localhost:6379/1'),
+    }
+}
+
