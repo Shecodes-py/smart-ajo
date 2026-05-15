@@ -200,11 +200,14 @@ class SquadCallbackView(APIView):
     permission_classes = []  
 
     def post(self, request):
-        transaction_ref = request.data.get('transaction_ref') or request.query_params.get('transaction_ref')
+        # 1. FIX: Squad webhooks wrap data inside a 'Body' object
+        body_data = request.data.get('Body', {})
+        transaction_ref = body_data.get('transaction_ref') or request.query_params.get('transaction_ref')
 
         if not transaction_ref:
             return Response({"error": "No transaction ref provided."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 2. Call Squad's API to verify this transaction status independently
         result = verify_payment(transaction_ref)
 
         if not result['success']:
@@ -218,40 +221,46 @@ class SquadCallbackView(APIView):
         group_id = metadata.get('group_id')
         round_number = metadata.get('round_number')
 
+        # 3. Consolidating database processing into a single atomic block
         try:
-            user = User.objects.get(id=user_id)
-            # Wrap Webhook execution inside atomic transaction block using row locks
             with transaction.atomic():
+                user = User.objects.get(id=user_id)
+                # Lock the group row to safely manage current_round state mutations
                 group = Group.objects.select_for_update().get(id=group_id)
-        except Exception:
+                
+                contribution = Contribution.objects.filter(
+                    user=user, group=group, round_number=round_number
+                ).first()
+
+                if not contribution:
+                    return Response({"error": "Contribution record not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                # Idempotency safety: Stop processing if already paid
+                if contribution.status in ['paid', 'late']:
+                    return Response({"message": "Payment already processed previously."}, status=status.HTTP_200_OK)
+
+                # Record contribution status
+                now = timezone.now()
+                contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
+                contribution.paid_at = now
+                contribution.save()
+
+                # Trigger notifications and risk calculations
+                notify(
+                    user,
+                    'payment_received',
+                    'Contribution Recorded',
+                    f'Your ₦{contribution.amount:,.0f} contribution to {group.name} (Round {round_number}) was received.'
+                )
+                update_user_risk(user)
+                
+                # Check if this contribution closes the round and triggers an Ajo payout
+                self._check_and_process_payout(group, round_number)
+
+        except (User.DoesNotExist, Group.DoesNotExist):
             return Response({"error": "User or group not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        with transaction.atomic():
-            contribution = Contribution.objects.filter(
-                user=user, group=group, round_number=round_number
-            ).first()
-
-            if not contribution:
-                return Response({"error": "Contribution record not found."}, status=status.HTTP_404_NOT_FOUND)
-
-            # Prevent processing a webhook payload that has already marked this contribution paid
-            if contribution.status in ['paid', 'late']:
-                return Response({"message": "Payment already processed previously."}, status=status.HTTP_200_OK)
-
-            now = timezone.now()
-            contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
-            contribution.paid_at = now
-            contribution.save()
-
-            notify(
-                user,
-                'payment_received',
-                'Contribution Recorded',
-                f'Your ₦{contribution.amount:,.0f} contribution to {group.name} (Round {round_number}) was received.'
-            )
-
-            update_user_risk(user)
-            self._check_and_process_payout(group, round_number)
+        except Exception as e:
+            return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"message": "Payment confirmed."}, status=status.HTTP_200_OK)
 
@@ -306,7 +315,6 @@ class SquadCallbackView(APIView):
                     else:
                         group.current_round += 1
                     group.save()
-
 
 class MakeContributionView(APIView):
     """User pays their contribution for the current round."""

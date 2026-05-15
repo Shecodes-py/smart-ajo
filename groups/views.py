@@ -1,3 +1,5 @@
+from time import timezone
+
 from django.shortcuts import render
 from rest_framework.generics import ListCreateAPIView
 import hashlib 
@@ -111,7 +113,23 @@ class JoinGroupView(APIView):
         if group.is_full:
             group.status = 'active'
             group.current_round = 1
+            group.start_date = timezone.now().date()  
             group.save()
+
+            from contributions.models import Contribution
+            from contributions.tasks import calculate_due_date
+            due = calculate_due_date(group, group.start_date)
+            for membership in group.memberships.filter(is_active=True):
+                Contribution.objects.get_or_create(
+                    user=membership.user,
+                    group=group,
+                    round_number=1,
+                    defaults={
+                        'amount': group.contribution_amount,
+                        'status': 'pending',
+                        'due_date': due
+                    }
+                )
 
         return Response(
             {"message": f"You have joined {group.name}. Your payout position is #{next_position}."},
@@ -289,4 +307,56 @@ class GroupHealthView(APIView):
                 "late": late,
                 "missed": missed
             }
+        })
+    
+
+class MemberProfileView(APIView):
+    """GET /api/groups/{group_id}/members/{member_id}/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, group_id, member_id):
+        group = get_object_or_404(Group, pk=group_id)
+
+        membership = get_object_or_404(
+            Membership,
+            group=group,
+            user_id=member_id,
+            is_active=True
+        )
+
+        user = membership.user
+
+        # Full contribution history for this member in this group
+        from contributions.models import Contribution
+        contributions = Contribution.objects.filter(
+            user=user,
+            group=group
+        ).order_by('round_number')
+
+        contribution_data = [
+            {
+                "round_number": c.round_number,
+                "amount": c.amount,
+                "status": c.status,
+                "paid_at": c.paid_at,
+                "due_date": c.due_date,
+            }
+            for c in contributions
+        ]
+
+        return Response({
+            "id": user.id,
+            "full_name": user.full_name or user.get_full_name() or user.username,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "risk_score": user.risk_score,
+            "risk_level": user.risk_level,
+            "rotation_order": membership.rotation_order,
+            "has_received_payout": membership.has_received_payout,
+            "joined_at": membership.joined_at,
+            "total_contributions": contributions.count(),
+            "paid_count": contributions.filter(status='paid').count(),
+            "late_count": contributions.filter(status='late').count(),
+            "missed_count": contributions.filter(status='missed').count(),
+            "contributions": contribution_data
         })

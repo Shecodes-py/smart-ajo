@@ -21,22 +21,28 @@ class MemberSerializer(serializers.ModelSerializer):
         ]
 
 
+class GroupAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'username', 'full_name']
+
 class GroupSerializer(serializers.ModelSerializer):
-    admin = serializers.CharField(source='admin.get_full_name', read_only=True)
+    created_by = GroupAdminSerializer(read_only=True) 
     total_members = serializers.IntegerField(read_only=True)
     pool_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    target_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     is_full = serializers.BooleanField(read_only=True)
     members = MemberSerializer(source='memberships', many=True, read_only=True)
 
     class Meta:
         model = Group
         fields = [
-            'id', 'name', 'description', 'admin', 'code',
+            'id', 'name', 'description', 'created_by', 'code',
             'contribution_amount', 'contribution_frequency', 'max_members', 'status',
             'current_round', 'start_date', 'total_members', 'pool_amount', 'due_date',
-            'is_full', 'members', 'created_at', 'is_private'
+            'is_full', 'members', 'created_at', 'is_private',"target_amount"
         ]
-        read_only_fields = ['admin', 'status', 'current_round', 'code', 'created_at']
+        read_only_fields = ['created_by', 'status', 'current_round', 'code', 'created_at']
 
 
 class CreateGroupSerializer(serializers.ModelSerializer):
@@ -57,4 +63,10 @@ class CreateGroupSerializer(serializers.ModelSerializer):
     def validate_contribution_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError("Contribution amount must be greater than 0.")
+        return value
+
+    def validate_frequency(self, value):
+        valid = ['daily', 'weekly', 'biweekly', 'monthly']
+        if not value or value not in valid:
+            return None
         return value

@@ -7,6 +7,8 @@ from .models import Contribution
 from .risks import update_user_risk
 from notifications.utils import notify
 
+from time import timedelta
+
 User = get_user_model()
 
 @shared_task
@@ -18,6 +20,14 @@ def mark_missed_contributions():
     """
     today = timezone.now().date()
 
+    GRACE_DAYS = {
+        'daily': 0,      # no grace — mark missed same day at midnight
+        'weekly': 2,
+        'biweekly': 3,
+        'monthly': 7,
+    }
+
+
     # Find all pending contributions that are overdue
     overdue = Contribution.objects.filter(
         status='pending',
@@ -28,8 +38,21 @@ def mark_missed_contributions():
     affected_users = set()
 
     for contribution in overdue:
-        contribution.status = 'missed'
-        contribution.save()
+        freq = contribution.group.frequency or 'monthly'
+        grace = GRACE_DAYS.get(freq, 0)
+        deadline = contribution.due_date + timedelta(days=grace)
+        
+        if today > deadline:
+            contribution.status = 'missed'
+            contribution.save()
+            affected_users.add(contribution.user_id)
+            missed_count += 1
+        elif today >= contribution.due_date:
+            # Within grace period — mark late but not missed
+            contribution.status = 'late'
+            contribution.save()
+            affected_users.add(contribution.user_id)
+
 
         notify(
                 contribution.user,

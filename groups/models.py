@@ -37,7 +37,7 @@ class Group(models.Model):
     admin = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='admin_groups')
     
     contribution_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    contribution_frequency = models.CharField(max_length=50, blank=True, choices=FREQUENCY_CHOICES)
+    contribution_frequency = models.CharField(max_length=50, blank=True, choices=FREQUENCY_CHOICES, null=True)
     
     max_members = models.PositiveIntegerField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
@@ -76,6 +76,22 @@ class Group(models.Model):
                 code = generate_group_code()
             self.code = code
         super().save(*args, **kwargs)
+
+    @property
+    def pool_amount(self):
+        """Money actually collected so far from paid contributions."""
+        from contributions.models import Contribution
+        from django.db.models import Sum
+        result = Contribution.objects.filter(
+            group=self,
+            status__in=['paid', 'late']
+        ).aggregate(total=Sum('amount'))
+        return result['total'] or 0
+
+    @property
+    def target_amount(self):
+        """Total goal — contribution × max members."""
+        return self.contribution_amount * self.max_members
 
 
 class Membership(models.Model):
