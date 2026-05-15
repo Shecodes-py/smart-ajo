@@ -29,7 +29,7 @@ def initiate_payment(user, group, amount_naira):
         "callback_url": settings.SQUAD_CALLBACK_URL,
         # "redirect_url": f"{settings.SQUAD_REDIRECT_URL.rstrip('/')}/pages/payment-success.html",
 
-        "meta_data": {
+        "metadata": {
             "user_id": user.id,
             "group_id": group.id,
             "round_number": group.current_round
