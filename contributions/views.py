@@ -171,7 +171,7 @@ class InitiateContributionView(APIView):
 class SquadCallbackView(APIView):
     """
     Step 2 — Squad hits this after payment is completed.
-    This is your webhook endpoint — verify and record the payment.
+    This is the webhook endpoint — verify and record the payment.
     """
     permission_classes = []  # Squad hits this, not the user
 

@@ -1,4 +1,5 @@
 import requests
+import time
 from django.conf import settings
 
 SQUAD_BASE_URL = "https://sandbox-api-d.squadco.com"
@@ -16,13 +17,14 @@ def initiate_payment(user, group, amount_naira):
     """
     
     customer_name = user.get_full_name().strip() or user.username or user.email
+    tx_ref = f"AJO-{user.id}-{group.id}-{group.current_round}-{int(time.time())}"
 
     payload = {
         "email": user.email,
         "amount": int(amount_naira * 100),  # Squad uses kobo
         "currency": "NGN",
         "initiate_type": "inline",
-        "transaction_ref": f"AJO-{user.id}-{group.id}-{group.current_round}",
+        "transaction_ref": tx_ref,
         "customer_name": customer_name,
         "callback_url": settings.SQUAD_CALLBACK_URL,
         "metadata": {
