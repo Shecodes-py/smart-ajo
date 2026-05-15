@@ -27,7 +27,8 @@ def initiate_payment(user, group, amount_naira):
         "transaction_ref": tx_ref,
         "customer_name": customer_name,
         "callback_url": settings.SQUAD_CALLBACK_URL,
-        "redirect_url": settings.SQUAD_REDIRECT_URL,
+        # "redirect_url": f"{settings.SQUAD_REDIRECT_URL.rstrip('/')}/pages/payment-success.html",
+
         "metadata": {
             "user_id": user.id,
             "group_id": group.id,
