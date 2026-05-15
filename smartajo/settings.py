@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'contributions',
     'wallets',
     'payments',   
+    'notifications',
 
 ]
 

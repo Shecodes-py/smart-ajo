@@ -1,5 +1,4 @@
-from django.shortcuts import render
-from django.shortcuts import get_object_or_404
+from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
 from django.db import transaction
 
@@ -17,8 +16,10 @@ from .serializers import ContributionSerializer, PayoutSerializer
 from .risks import update_user_risk
 from .squad import initiate_payment, verify_payment
 from wallets.models import Wallet, WalletTransaction
-        
-# Create your views here.
+from notifications.utils import notify, notify_group
+
+from django.contrib.auth import get_user_model
+User = get_user_model()   
 
 @extend_schema(
     request=None,
@@ -41,7 +42,7 @@ from wallets.models import Wallet, WalletTransaction
 class InitiateContributionView(APIView):
     """
     Step 1 — user hits this endpoint to start payment.
-    Returns a Squad checkout URL they visit to pay.
+    Returns a Squad checkout URL they visit to pay or handles immediate wallet deduction.
     """
     permission_classes = [IsAuthenticated]
 
@@ -53,16 +54,10 @@ class InitiateContributionView(APIView):
             user=request.user, group=group, is_active=True
         ).first()
         if not membership:
-            return Response(
-                {"error": "You are not a member of this group."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({"error": "You are not a member of this group."}, status=status.HTTP_403_FORBIDDEN)
 
         if group.status != 'active':
-            return Response(
-                {"error": "This group is not currently active."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "This group is not currently active."}, status=status.HTTP_400_BAD_REQUEST)
 
         already_paid = Contribution.objects.filter(
             user=request.user,
@@ -72,108 +67,137 @@ class InitiateContributionView(APIView):
         ).exists()
 
         if already_paid:
-            return Response(
-                {"error": f"You have already paid for round {group.current_round}."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        result = initiate_payment(request.user, group, group.contribution_amount)
-
-        if not result['success']:
-            return Response(
-                {"error": result['error']},
-                status=status.HTTP_502_BAD_GATEWAY
-            )
-
-        # Save a pending contribution so we can track it
-        Contribution.objects.get_or_create(
-            user=request.user,
-            group=group,
-            round_number=group.current_round,
-            defaults={
-                'amount': group.contribution_amount,
-                'due_date': timezone.now().date(),
-                'status': 'pending'
-            }
-        )
+            return Response({"error": f"You have already paid for round {group.current_round}."}, status=status.HTTP_400_BAD_REQUEST)
 
         if method == "squad":
             result = initiate_payment(request.user, group, group.contribution_amount)
             if not result['success']:
-                return Response({"error": result['error']}, status=502)
-            
-            # Create the pending record so the webhook has something to find
+                return Response({"error": result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
             Contribution.objects.get_or_create(
-                user=request.user, group=group, round_number=group.current_round,
-                defaults={'amount': group.contribution_amount, 'due_date': timezone.now().date(), 'status': 'pending'}
+                user=request.user,
+                group=group,
+                round_number=group.current_round,
+                defaults={
+                    'amount': group.contribution_amount,
+                    'due_date': timezone.now().date(),
+                    'status': 'pending'
+                }
             )
-            return Response(result, status=200)
+            return Response({
+                "message": "Proceed to payment.",
+                "checkout_url": result['checkout_url'],
+                "transaction_ref": result['transaction_ref'],
+                "amount": group.contribution_amount
+            }, status=status.HTTP_200_OK)
 
         elif method == "wallet":
             with transaction.atomic():
+                # Lock the group row to prevent race conditions during immediate wallet processing
+                locked_group = Group.objects.select_for_update().get(pk=group.id)
                 wallet = get_object_or_404(Wallet, user=request.user)
-                if wallet.balance < group.contribution_amount:
-                    return Response({"error": "Insufficient funds"}, status=400)
+
+                if wallet.balance < locked_group.contribution_amount:
+                    return Response({"error": "Insufficient funds"}, status=status.HTTP_400_BAD_REQUEST)
                     
-                wallet.balance -= group.contribution_amount
+                wallet.balance -= locked_group.contribution_amount
                 wallet.save()
 
+                WalletTransaction.objects.create(
+                    wallet=wallet,
+                    type="contribution",
+                    amount=locked_group.contribution_amount,
+                    status="success",
+                    description=f"Contribution to {locked_group.name} — Round {locked_group.current_round}"
+                )
 
-        # Record wallet transaction
-        WalletTransaction.objects.create(
-            wallet=wallet,
-            type="contribution",
-            amount=group.contribution_amount,
-            status="success",
-            description=f"Contribution to {group.name} — Round {group.current_round}"
-        )
+                contribution, _ = Contribution.objects.get_or_create(
+                    user=request.user,
+                    group=locked_group,
+                    round_number=locked_group.current_round,
+                    defaults={
+                        'amount': locked_group.contribution_amount,
+                        'due_date': timezone.now().date()
+                    }
+                )
+                contribution.status = 'paid'
+                contribution.paid_at = timezone.now()
+                contribution.save()
 
-        # Mark contribution as paid
-        contribution, _ = Contribution.objects.get_or_create(
-            user=request.user,
+                notify(
+                    request.user,
+                    'payment_received',
+                    'Contribution Recorded',
+                    f'Your ₦{contribution.amount:,.0f} contribution to {locked_group.name} (Round {locked_group.current_round}) was received.'
+                )
+
+                update_user_risk(request.user)
+                self._check_and_process_payout(locked_group, locked_group.current_round)
+
+                return Response({
+                    "message": f"Contribution of ₦{locked_group.contribution_amount} processed via wallet successfully.",
+                    "status": "paid",
+                    "amount": locked_group.contribution_amount
+                }, status=status.HTTP_200_OK)
+
+        return Response({"error": "Invalid payment method specified."}, status=status.HTTP_400_BAD_REQUEST)
+
+    def _check_and_process_payout(self, group, round_number):
+        # Fallback helper just in case an un-locked group object slips into this view method
+        total_members = group.total_members
+        paid_count = Contribution.objects.filter(
             group=group,
-            round_number=group.current_round,
-            defaults={
-                'amount': group.contribution_amount,
-                'due_date': timezone.now().date(),
-                'status': 'pending'
-            }
-        )
-        contribution.status = 'paid'
-        contribution.paid_at = timezone.now()
-        contribution.save()
+            round_number=round_number,
+            status__in=['paid', 'late']
+        ).count()
 
-        update_user_risk(request.user)
-        self._check_and_process_payout(group, group.current_round)
+        if paid_count >= total_members:
+            recipient_membership = Membership.objects.filter(
+                group=group,
+                rotation_order=round_number,
+                is_active=True
+            ).first()
+
+            if recipient_membership:
+                payout_amount = group.contribution_amount * total_members
+                payout, created = Payout.objects.get_or_create(
+                    group=group,
+                    round_number=round_number,
+                    defaults={
+                        'recipient': recipient_membership.user,
+                        'amount': payout_amount,
+                        'status': 'paid',
+                        'paid_at': timezone.now()
+                    }
+                )
+                
+                if created:
+                    recipient_membership.has_received_payout = True
+                    recipient_membership.save()
+
+                    notify(
+                        recipient_membership.user,
+                        'payout',
+                        '🎉 Payout Received!',
+                        f'You received ₦{payout_amount:,.0f} from {group.name}.'
+                    )
+                    notify_group(
+                        group,
+                        'payout',
+                        'Round Complete',
+                        f'Round {round_number} of {group.name} is complete. {recipient_membership.user.get_full_name()} received the payout.',
+                        exclude_user=recipient_membership.user
+                    )
+
+                    if round_number >= group.max_members:
+                        group.status = 'completed'
+                    else:
+                        group.current_round += 1
+                    group.save()
 
 
-        return Response({
-            "message": "Proceed to payment.",
-            "checkout_url": result['checkout_url'],
-            "transaction_ref": result['transaction_ref'],
-            "amount": group.contribution_amount
-        }, status=status.HTTP_200_OK)
-
-@extend_schema(
-    request=inline_serializer(
-        name='SquadCallbackRequest',
-        fields={'transaction_ref': serializers.CharField()}
-    ),
-    responses={
-        200: inline_serializer(
-            name='SquadCallbackResponse',
-            fields={'message': serializers.CharField()}
-        ),
-    },
-    summary="Squad payment webhook callback",
-    tags=["Contributions"]
-    )
 class SquadCallbackView(APIView):
-    """
-    Step 2 — Squad hits this after payment is completed.
-    This is the webhook endpoint — verify and record the payment.
-    """
-    permission_classes = []  # Squad hits this, not the user
+    permission_classes = []  
 
     def post(self, request):
         transaction_ref = request.data.get('transaction_ref') or request.query_params.get('transaction_ref')
@@ -189,38 +213,45 @@ class SquadCallbackView(APIView):
         if result['status'] != 'success':
             return Response({"message": "Payment was not successful."}, status=status.HTTP_200_OK)
 
-        # Extract metadata we stored during initiation
         metadata = result['metadata']
         user_id = metadata.get('user_id')
         group_id = metadata.get('group_id')
         round_number = metadata.get('round_number')
 
         try:
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
             user = User.objects.get(id=user_id)
-            group = Group.objects.get(id=group_id)
+            # Wrap Webhook execution inside atomic transaction block using row locks
+            with transaction.atomic():
+                group = Group.objects.select_for_update().get(id=group_id)
         except Exception:
             return Response({"error": "User or group not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update the contribution record
-        contribution = Contribution.objects.filter(
-            user=user, group=group, round_number=round_number
-        ).first()
+        with transaction.atomic():
+            contribution = Contribution.objects.filter(
+                user=user, group=group, round_number=round_number
+            ).first()
 
-        if not contribution:
-            return Response({"error": "Contribution record not found."}, status=status.HTTP_404_NOT_FOUND)
+            if not contribution:
+                return Response({"error": "Contribution record not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        now = timezone.now()
-        contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
-        contribution.paid_at = now
-        contribution.save()
+            # Prevent processing a webhook payload that has already marked this contribution paid
+            if contribution.status in ['paid', 'late']:
+                return Response({"message": "Payment already processed previously."}, status=status.HTTP_200_OK)
 
-        # Update risk score
-        update_user_risk(user)
+            now = timezone.now()
+            contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
+            contribution.paid_at = now
+            contribution.save()
 
-        # Check if round is complete
-        self._check_and_process_payout(group, round_number)
+            notify(
+                user,
+                'payment_received',
+                'Contribution Recorded',
+                f'Your ₦{contribution.amount:,.0f} contribution to {group.name} (Round {round_number}) was received.'
+            )
+
+            update_user_risk(user)
+            self._check_and_process_payout(group, round_number)
 
         return Response({"message": "Payment confirmed."}, status=status.HTTP_200_OK)
 
@@ -241,7 +272,7 @@ class SquadCallbackView(APIView):
 
             if recipient_membership:
                 payout_amount = group.contribution_amount * total_members
-                Payout.objects.get_or_create(
+                payout, created = Payout.objects.get_or_create(
                     group=group,
                     round_number=round_number,
                     defaults={
@@ -251,97 +282,88 @@ class SquadCallbackView(APIView):
                         'paid_at': timezone.now()
                     }
                 )
-                recipient_membership.has_received_payout = True
-                recipient_membership.save()
+                
+                if created:
+                    recipient_membership.has_received_payout = True
+                    recipient_membership.save()
 
-                if round_number >= group.max_members:
-                    group.status = 'completed'
-                else:
-                    group.current_round += 1
-                group.save()
+                    notify(
+                        recipient_membership.user,
+                        'payout',
+                        '🎉 Payout Received!',
+                        f'You received ₦{payout_amount:,.0f} from {group.name}.'
+                    )
+                    notify_group(
+                        group,
+                        'payout',
+                        'Round Complete',
+                        f'Round {round_number} of {group.name} is complete. {recipient_membership.user.get_full_name()} received the payout.',
+                        exclude_user=recipient_membership.user
+                    )
 
-@extend_schema(
-    request=None,
-    responses={
-        200: inline_serializer(
-            name='MakeContributionResponse',
-            fields={
-                'message': serializers.CharField(),
-                'status': serializers.CharField(),
-                'your_risk_level': serializers.CharField(),
-            }
-        ),
-        403: inline_serializer(name='MembershipError', fields={'error': serializers.CharField()}),
-    },
-    summary="Make a contribution for current round",
-    tags=["Contributions"]
-    )
+                    if round_number >= group.max_members:
+                        group.status = 'completed'
+                    else:
+                        group.current_round += 1
+                    group.save()
+
+
 class MakeContributionView(APIView):
     """User pays their contribution for the current round."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, group_id):
-        group = get_object_or_404(Group, pk=group_id)
+        # We also lock the group here during direct simulation changes
+        with transaction.atomic():
+            group = Group.objects.select_for_update().get(pk=group_id)
 
-        # before allowing a contribution, 3 thingssss
-        
-        # Must be a member
-        membership = Membership.objects.filter(
-            user=request.user, group=group, is_active=True
-        ).first()
-        if not membership:
-            return Response(
-                {"error": "You are not a member of this group."},
-                status=status.HTTP_403_FORBIDDEN
+            membership = Membership.objects.filter(
+                user=request.user, group=group, is_active=True
+            ).first()
+            if not membership:
+                return Response({"error": "You are not a member of this group."}, status=status.HTTP_403_FORBIDDEN)
+
+            if group.status != 'active':
+                return Response({"error": "This group is not currently active."}, status=status.HTTP_400_BAD_REQUEST)
+
+            round_number = group.current_round
+
+            already_paid = Contribution.objects.filter(
+                user=request.user,
+                group=group,
+                round_number=round_number,
+                status='paid'
+            ).exists()
+
+            if already_paid:
+                return Response({"error": f"You have already paid for round {round_number}."}, status=status.HTTP_400_BAD_REQUEST)
+
+            contribution, created = Contribution.objects.get_or_create(
+                user=request.user,
+                group=group,
+                round_number=round_number,
+                defaults={
+                    'amount': group.contribution_amount,
+                    'due_date': timezone.now().date(),
+                    'status': 'pending'
+                }
             )
 
-        # Group must be active
-        if group.status != 'active':
-            return Response(
-                {"error": "This group is not currently active."},
-                status=status.HTTP_400_BAD_REQUEST
+            now = timezone.now()
+            contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
+            contribution.paid_at = now
+            contribution.amount = group.contribution_amount
+            contribution.save()
+            
+            notify(
+                request.user,
+                'payment_received',
+                'Contribution Recorded',
+                f'Your ₦{contribution.amount:,.0f} contribution to {group.name} (Round {round_number}) was received.'
             )
-
-        round_number = group.current_round
-
-        # Check if already paid this round
-        already_paid = Contribution.objects.filter(
-            user=request.user,
-            group=group,
-            round_number=round_number,
-            status='paid'
-        ).exists()
-
-        if already_paid:
-            return Response(
-                {"error": f"You have already paid for round {round_number}."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Get or create the contribution record
-        contribution, created = Contribution.objects.get_or_create(
-            user=request.user,
-            group=group,
-            round_number=round_number,
-            defaults={
-                'amount': group.contribution_amount,
-                'due_date': timezone.now().date(),
-                'status': 'pending'
-            }
-        )
-
-        # Mark as paid or late
-        now = timezone.now()
-        contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
-        contribution.paid_at = now
-        contribution.amount = group.contribution_amount
-        contribution.save()
-
-        # Recalculate risk score
-        update_user_risk(request.user)
-
-        # Check if all members have paid this round → trigger payout
-        self._check_and_process_payout(group, round_number)
+            
+            update_user_risk(request.user)
+            self._check_and_process_payout(group, round_number)
 
         return Response({
             "message": f"Contribution of ₦{group.contribution_amount} recorded for round {round_number}.",
@@ -350,7 +372,6 @@ class MakeContributionView(APIView):
         }, status=status.HTTP_200_OK)
 
     def _check_and_process_payout(self, group, round_number):
-        """If all members paid, process the payout for this round."""
         total_members = group.total_members
         paid_count = Contribution.objects.filter(
             group=group,
@@ -359,7 +380,6 @@ class MakeContributionView(APIView):
         ).count()
 
         if paid_count >= total_members:
-            # Find who receives payout this round
             recipient_membership = Membership.objects.filter(
                 group=group,
                 rotation_order=round_number,
@@ -368,7 +388,7 @@ class MakeContributionView(APIView):
 
             if recipient_membership:
                 payout_amount = group.contribution_amount * total_members
-                Payout.objects.get_or_create(
+                payout, created = Payout.objects.get_or_create(
                     group=group,
                     round_number=round_number,
                     defaults={
@@ -378,19 +398,19 @@ class MakeContributionView(APIView):
                         'paid_at': timezone.now()
                     }
                 )
-                recipient_membership.has_received_payout = True
-                recipient_membership.save()
+                
+                if created:
+                    recipient_membership.has_received_payout = True
+                    recipient_membership.save()
 
-                # Advance to next round or complete the group
-                if round_number >= group.max_members:
-                    group.status = 'completed'
-                else:
-                    group.current_round += 1
-                group.save()
+                    if round_number >= group.max_members:
+                        group.status = 'completed'
+                    else:
+                        group.current_round += 1
+                    group.save()
 
 
 class GroupContributionsView(generics.ListAPIView):
-    """All contributions for a specific group."""
     serializer_class = ContributionSerializer
     permission_classes = [IsAuthenticated]
 
@@ -400,7 +420,6 @@ class GroupContributionsView(generics.ListAPIView):
 
 
 class MyContributionsView(generics.ListAPIView):
-    """Logged-in user's full contribution history."""
     serializer_class = ContributionSerializer
     permission_classes = [IsAuthenticated]
 
@@ -428,7 +447,7 @@ class MyContributionsView(generics.ListAPIView):
                         'paid_at': serializers.DateTimeField(),
                         'risk_level': serializers.CharField(),
                     },
-                    many=True  # <-- tells Swagger it's a list
+                    many=True
                 ),
             }
         )
@@ -437,7 +456,6 @@ class MyContributionsView(generics.ListAPIView):
     tags=["Contributions"]
 )
 class RoundSummaryView(APIView):
-    """Shows who paid and who hasn't for the current round."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, group_id):
@@ -462,7 +480,6 @@ class RoundSummaryView(APIView):
                 "risk_level": membership.user.risk_level,
             })
 
-        # Find who receives payout this round
         payout_member = Membership.objects.filter(
             group=group,
             rotation_order=round_number
@@ -479,7 +496,6 @@ class RoundSummaryView(APIView):
 
 
 class GroupPayoutsView(generics.ListAPIView):
-    """Payout history for a group."""
     serializer_class = PayoutSerializer
     permission_classes = [IsAuthenticated]
 

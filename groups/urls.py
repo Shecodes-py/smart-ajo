@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (
     CreateGroupView, ListGroupsView, MyGroupsView,
-    GroupDetailView, JoinGroupView, LeaveGroupView, GroupMembersView, JoinGroupByCodeView
+    GroupDetailView, JoinGroupView, LeaveGroupView, GroupMembersView, JoinGroupByCodeView,
+    GroupInviteLinkView, GroupHealthView
 )
 
 # wrte your urls here
@@ -14,4 +15,7 @@ urlpatterns = [
     path('<int:pk>/leave/', LeaveGroupView.as_view(), name='leave-group'),
     path('<int:pk>/members/', GroupMembersView.as_view(), name='group-members'),
     path('join-by-code/', JoinGroupByCodeView.as_view(), name='join-by-code'),
+
+    path('<int:pk>/invite-link/', GroupInviteLinkView.as_view(), name='invite-link'),
+    path('<int:pk>/health/', GroupHealthView.as_view(), name='group-health'),
 ]

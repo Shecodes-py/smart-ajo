@@ -1,5 +1,7 @@
 from django.shortcuts import render
 from rest_framework.generics import ListCreateAPIView
+import hashlib 
+from django.conf import settings
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -195,3 +197,86 @@ class GroupMembersView(generics.ListAPIView):
     def get_queryset(self):
         group = get_object_or_404(Group, pk=self.kwargs['pk'])
         return Membership.objects.filter(group=group, is_active=True)
+    
+
+class GroupInviteLinkView(APIView):
+    """GET /api/groups/{id}/invite-link/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        group = get_object_or_404(Group, pk=pk)
+
+        # Use the group's code directly
+        invite_url = f"https://smartajo.app/join/{group.code}"
+
+        return Response({
+            "invite_link": invite_url,
+            "code": group.code,
+            "group_name": group.name
+        })
+
+
+class GroupHealthView(APIView):
+    """GET /api/groups/{id}/health/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        group = get_object_or_404(Group, pk=pk)
+        members = group.memberships.filter(is_active=True).select_related('user')
+        total = members.count()
+
+        if total == 0:
+            return Response({
+                "score": 100,
+                "label": "Excellent",
+                "details": "No members yet.",
+                "breakdown": {}
+            })
+
+        from contributions.models import Contribution
+
+        total_contributions = Contribution.objects.filter(group=group).count()
+        missed = Contribution.objects.filter(group=group, status='missed').count()
+        late = Contribution.objects.filter(group=group, status='late').count()
+        paid = Contribution.objects.filter(group=group, status='paid').count()
+
+        # Risk breakdown
+        high_risk = sum(1 for m in members if m.user.risk_level == 'high')
+        medium_risk = sum(1 for m in members if m.user.risk_level == 'medium')
+        low_risk = sum(1 for m in members if m.user.risk_level == 'low')
+
+        # Score — start at 100, deduct for issues
+        score = 100
+        if total_contributions > 0:
+            miss_rate = missed / total_contributions
+            late_rate = late / total_contributions
+            score -= int(miss_rate * 60)   # missed payments hurt most
+            score -= int(late_rate * 20)   # late payments hurt less
+        score -= high_risk * 10            # each high risk member costs 10 points
+        score -= medium_risk * 3           # each medium risk member costs 3 points
+        score = max(0, min(100, score))    # clamp 0-100
+
+        if score >= 80:
+            label = "Excellent"
+        elif score >= 60:
+            label = "Good"
+        elif score >= 40:
+            label = "Fair"
+        else:
+            label = "At Risk"
+
+        return Response({
+            "score": score,
+            "label": label,
+            "details": f"{paid} on-time payments, {late} late, {missed} missed across {total} members.",
+            "breakdown": {
+                "total_members": total,
+                "low_risk_members": low_risk,
+                "medium_risk_members": medium_risk,
+                "high_risk_members": high_risk,
+                "total_contributions": total_contributions,
+                "paid": paid,
+                "late": late,
+                "missed": missed
+            }
+        })

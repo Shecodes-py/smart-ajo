@@ -1,9 +1,11 @@
 from celery import shared_task
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+
 from groups.models import Group, Membership
 from .models import Contribution
 from .risks import update_user_risk
+from notifications.utils import notify
 
 User = get_user_model()
 
@@ -28,6 +30,14 @@ def mark_missed_contributions():
     for contribution in overdue:
         contribution.status = 'missed'
         contribution.save()
+
+        notify(
+                contribution.user,
+                'missed_payment',
+                '⚠️ Missed Contribution',
+                f'You missed your contribution for {contribution.group.name} Round {contribution.round_number}. This affects your risk score.'
+            )
+
         affected_users.add(contribution.user_id)
         missed_count += 1
 
@@ -112,6 +122,13 @@ def send_payment_reminders():
                 fail_silently=True
             )
             reminded_count += 1
+
+            notify(
+                    contribution.user,
+                    'payment_due',
+                    'Payment Due Tomorrow',
+                    f'Your ₦{contribution.amount:,.0f} contribution to {contribution.group.name} is due tomorrow.'
+                )
         except Exception:
             pass
 
