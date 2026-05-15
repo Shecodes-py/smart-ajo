@@ -217,6 +217,7 @@ DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 # squad api settings
 SQUAD_SECRET_KEY = os.getenv('SQUAD_SECRET_KEY')
 SQUAD_CALLBACK_URL = os.getenv('SQUAD_CALLBACK_URL')
+SQUAD_REDIRECT_URL = os.getenv('SQUAD_REDIRECT_URL')
 
 # Squad callbacks
 SQUAD_WALLET_CALLBACK_URL = os.getenv('SQUAD_WALLET_CALLBACK_URL')
