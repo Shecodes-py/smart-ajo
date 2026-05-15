@@ -34,7 +34,7 @@ class GroupSerializer(serializers.ModelSerializer):
             'id', 'name', 'description', 'admin', 'code',
             'contribution_amount', 'contribution_frequency', 'max_members', 'status',
             'current_round', 'start_date', 'total_members', 'pool_amount', 'due_date',
-            'is_full', 'members', 'created_at'
+            'is_full', 'members', 'created_at', 'is_private'
         ]
         read_only_fields = ['admin', 'status', 'current_round', 'code', 'created_at']
 
@@ -43,7 +43,7 @@ class CreateGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = [
-            'name', 'description', 'contribution_amount',
+            'name', 'description', 'contribution_amount', 'is_private',
             'contribution_frequency', 'max_members', 'start_date'
         ]
 

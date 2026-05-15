@@ -50,6 +50,8 @@ class Group(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    is_private = models.BooleanField(default=False) 
  
     def __str__(self):
         return self.name

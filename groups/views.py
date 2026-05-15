@@ -42,13 +42,17 @@ class CreateGroupView(generics.CreateAPIView):
 
 
 class ListGroupsView(generics.ListAPIView):
+    """GET /api/groups/discover/ — only returns public open groups"""
     serializer_class = GroupSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         # Returns only open groups the user hasn't joined
         joined_groups = self.request.user.memberships.values_list('group_id', flat=True)
-        return Group.objects.filter(status='open').exclude(id__in=joined_groups)
+        return Group.objects.filter(
+            status='open',
+            is_private=False        # only public groups in discover
+            ).exclude(id__in=joined_groups)
 
 
 class MyGroupsView(generics.ListAPIView):
@@ -113,19 +117,25 @@ class JoinGroupView(APIView):
             {"message": f"You have joined {group.name}. Your payout position is #{next_position}."},
             status=status.HTTP_200_OK
         )
-
+    
 class JoinGroupByCodeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         code = request.data.get('code', '').strip().upper()
 
+        # check BEFORE normalizing
         if not code:
             return Response(
                 {"error": "Group code is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # normalize — add AJO- if not already there
+        if not code.startswith('AJO-'):
+            code = f"AJO-{code}"
+
+        # query ONCE
         group = Group.objects.filter(code=code).first()
         if not group:
             return Response(
@@ -171,7 +181,7 @@ class JoinGroupByCodeView(APIView):
             "group": GroupSerializer(group).data,
             "your_position": next_position
         }, status=status.HTTP_200_OK)
-
+    
 class LeaveGroupView(APIView):
     permission_classes = [IsAuthenticated]
 
