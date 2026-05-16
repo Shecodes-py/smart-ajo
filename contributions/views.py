@@ -23,6 +23,10 @@ from notifications.utils import notify, notify_group
 from django.contrib.auth import get_user_model
 User = get_user_model()   
 
+import logging
+
+logger = logging.getLogger(__name__)    
+
 @extend_schema(
     request=None,
     responses={
@@ -209,18 +213,24 @@ class SquadCallbackView(APIView):
         """Browser redirect after Squad checkout."""
         transaction_ref = request.query_params.get('reference') or \
                           request.query_params.get('transaction_ref')
+        
+        logger.info(f"Received GET callback from Squad with transaction_ref: {transaction_ref}")
 
         if not transaction_ref:
+            logger.warning("No transaction_ref found in GET callback from Squad.")
             # Redirect to failure page
             return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
 
         result = verify_payment(transaction_ref)
+        logger.info(f"Verification result for transaction_ref {transaction_ref}: {result}")
 
         if not result['success'] or result['status'] != 'success':
+            logger.warning(f"Payment verification failed for transaction_ref: {transaction_ref}. Result: {result}")
             return redirect(
                 f"{settings.FRONTEND_URL}/pages/payment-status.html"
                 f"?status=failed&transaction_ref={transaction_ref}"
             )
+        logger.info(f"Payment verified successfully for transaction_ref: {transaction_ref}")
 
         # Process the payment
         metadata = result.get('metadata', {})
@@ -232,6 +242,7 @@ class SquadCallbackView(APIView):
             user = User.objects.get(id=user_id)
             group = Group.objects.get(id=group_id)
         except Exception:
+            logger.error(f"User or Group not found for transaction_ref: {transaction_ref}. user_id: {user_id}, group_id: {group_id}")
             return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
 
         contribution = Contribution.objects.filter(

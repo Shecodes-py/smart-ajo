@@ -1,11 +1,10 @@
-from django.shortcuts import render
+from django.shortcuts import redirect
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, generics
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
-import uuid
+from django.conf import settings
+
 from .models import Wallet, WalletTransaction
 from .squad import initiate_funding, initiate_withdrawal, verify_transaction, generate_ref
 from .serializers import WalletSerializer, WalletTransactionSerializer
@@ -64,6 +63,33 @@ class FundWalletView(APIView):
 class WalletFundCallbackView(APIView):
     """POST /api/wallet/fund/callback/ — Squad webhook after funding"""
     permission_classes = []
+
+    def get(self, request):
+        """Browser redirect after Squad checkout."""
+        transaction_ref = request.query_params.get('reference') or \
+                          request.query_params.get('transaction_ref')
+
+        if not transaction_ref:
+            return redirect(f"{settings.FRONTEND_URL}/pages/wallet.html?status=failed")
+
+        result = verify_transaction(transaction_ref)
+
+        if not result['success'] or result['status'] != 'success':
+            return redirect(f"{settings.FRONTEND_URL}/pages/wallet.html?status=failed")
+
+        try:
+            txn = WalletTransaction.objects.get(reference=transaction_ref)
+            if txn.status != 'success':
+                txn.status = 'success'
+                txn.save()
+                wallet = txn.wallet
+                wallet.balance += txn.amount
+                wallet.save()
+        except WalletTransaction.DoesNotExist:
+            return redirect(f"{settings.FRONTEND_URL}/pages/wallet.html?status=failed")
+
+        return redirect(f"{settings.FRONTEND_URL}/pages/wallet.html?status=success")
+
 
     def post(self, request):
         transaction_ref = (
