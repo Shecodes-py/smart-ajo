@@ -27,7 +27,7 @@ class GroupAdminSerializer(serializers.ModelSerializer):
         fields = ['id', 'email', 'username', 'full_name']
 
 class GroupSerializer(serializers.ModelSerializer):
-    reated_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
     admin_id = serializers.IntegerField(source='created_by.id', read_only=True)  # add
     admin = GroupAdminSerializer(source='created_by', read_only=True)
     total_members = serializers.IntegerField(read_only=True)
