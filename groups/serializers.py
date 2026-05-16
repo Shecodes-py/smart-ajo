@@ -50,7 +50,7 @@ class GroupSerializer(serializers.ModelSerializer):
             'is_full', 'is_private', 'members', 'created_at'
         ]
         read_only_fields = [
-            'created_by', 'status', 'current_round',
+             'status', 'current_round',
             'code', 'end_date', 'total_rounds'
         ]
 
