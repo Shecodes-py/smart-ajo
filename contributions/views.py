@@ -233,10 +233,13 @@ class SquadCallbackView(APIView):
         logger.info(f"Payment verified successfully for transaction_ref: {transaction_ref}")
 
         # Process the payment
-        metadata = result.get('metadata', {})
-        user_id = metadata.get('user_id')
-        group_id = metadata.get('group_id')
-        round_number = metadata.get('round_number')
+        parsed = parse_transaction_ref(transaction_ref)
+        if not parsed:
+            return Response({"error": "Invalid transaction ref format."}, status=400)
+
+        user_id = parsed['user_id']
+        group_id = parsed['group_id']
+        round_number = parsed['round_number']
 
         try:
             user = User.objects.get(id=user_id)
