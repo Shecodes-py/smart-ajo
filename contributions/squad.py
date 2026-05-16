@@ -83,3 +83,23 @@ def verify_payment(transaction_ref):
         "success": False,
         "error": data.get('message', 'Verification failed.')
     }
+
+
+def parse_transaction_ref(transaction_ref):
+    """
+    Parse AJO-{user_id}-{group_id}-{round}-{timestamp}
+    Returns dict with user_id, group_id, round_number or None if invalid
+    """
+    try:
+        parts = transaction_ref.split('-')
+        # AJO - user_id - group_id - round - timestamp
+        # [0]   [1]       [2]        [3]     [4]
+        if len(parts) < 4 or parts[0] != 'AJO':
+            return None
+        return {
+            'user_id': int(parts[1]),
+            'group_id': int(parts[2]),
+            'round_number': int(parts[3]),
+        }
+    except (ValueError, IndexError):
+        return None

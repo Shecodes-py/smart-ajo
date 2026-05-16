@@ -16,7 +16,7 @@ from groups.models import Group, Membership
 from .models import Contribution, Payout
 from .serializers import ContributionSerializer, PayoutSerializer
 from .risks import update_user_risk
-from .squad import initiate_payment, verify_payment
+from .squad import initiate_payment, verify_payment, parse_transaction_ref
 from wallets.models import Wallet, WalletTransaction
 from notifications.utils import notify, notify_group
 
@@ -283,10 +283,21 @@ class SquadCallbackView(APIView):
         if result['status'] != 'success':
             return Response({"message": "Payment was not successful."}, status=status.HTTP_200_OK)
 
-        metadata = result['metadata']
-        user_id = metadata.get('user_id')
-        group_id = metadata.get('group_id')
-        round_number = metadata.get('round_number')
+        parsed = parse_transaction_ref(transaction_ref)
+        if not parsed:
+            return Response({"error": "Invalid transaction ref format."}, status=400)
+
+        user_id = parsed['user_id']
+        group_id = parsed['group_id']
+        round_number = parsed['round_number']
+
+        try:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.get(id=user_id)
+            group = Group.objects.get(id=group_id)
+        except Exception:
+            return Response({"error": "User or group not found."}, status=404)
 
         # 3. Consolidating database processing into a single atomic block
         try:
