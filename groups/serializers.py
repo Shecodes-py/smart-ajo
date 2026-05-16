@@ -42,7 +42,7 @@ class GroupSerializer(serializers.ModelSerializer):
         model = Group
         fields = [
             'id', 'name', 'description', 'code',
-            'created_by', 'created_by_name', 'admin_id', 'admin',
+             'created_by_name', 'admin_id', 'admin',
             'contribution_amount', 'contribution_frequency', 'max_members',
             'status', 'current_round', 'total_rounds',
             'start_date', 'end_date', 'due_date',
