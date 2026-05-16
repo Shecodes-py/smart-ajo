@@ -52,6 +52,9 @@ class Group(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     is_private = models.BooleanField(default=False) 
+    end_date = models.DateField(null=True, blank=True)       
+    total_rounds = models.PositiveIntegerField(null=True, blank=True)  
+    duration = models.PositiveIntegerField(null=True, blank=True) 
  
     def __str__(self):
         return self.name

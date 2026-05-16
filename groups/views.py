@@ -360,3 +360,69 @@ class MemberProfileView(APIView):
             "missed_count": contributions.filter(status='missed').count(),
             "contributions": contribution_data
         })
+
+
+class GroupPayoutsView(APIView):
+    """GET /api/contributions/payouts/{group_id}/"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, group_id):
+        group = get_object_or_404(Group, pk=group_id)
+        members = Membership.objects.filter(
+            group=group, is_active=True
+        ).select_related('user').order_by('rotation_order')
+
+        total_rounds = group.total_rounds or group.max_members
+        payout_amount = group.contribution_amount * group.total_members
+
+        from datetime import timedelta
+        frequency_days = {
+            'daily': 1, 'weekly': 7,
+            'biweekly': 14, 'monthly': 30
+        }
+        days_per_round = frequency_days.get(group.frequency, 7)
+
+        # Build a map of existing paid payouts
+        paid_payouts = {
+            p.round_number: p
+            for p in Payout.objects.filter(group=group)
+        }
+
+        # Build rotation map — position → member
+        rotation_map = {m.rotation_order: m for m in members}
+
+        schedule = []
+        for round_num in range(1, total_rounds + 1):
+            membership = rotation_map.get(round_num)
+            existing_payout = paid_payouts.get(round_num)
+
+            # Calculate payout date for this round
+            if group.start_date:
+                payout_date = group.start_date + timedelta(days=days_per_round * round_num)
+            else:
+                payout_date = None
+
+            # Determine status
+            if existing_payout and existing_payout.status == 'paid':
+                status = 'paid'
+            elif round_num == group.current_round:
+                status = 'upcoming'
+            else:
+                status = 'scheduled'
+
+            schedule.append({
+                'round_number': round_num,
+                'recipient_name': membership.user.get_full_name() or membership.user.username if membership else 'TBD',
+                'recipient_id': membership.user.id if membership else None,
+                'amount': payout_amount,
+                'payout_date': payout_date.isoformat() if payout_date else None,
+                'status': status,
+                'is_current_round': round_num == group.current_round
+            })
+
+        return Response({
+            'group': group.name,
+            'total_rounds': total_rounds,
+            'payout_amount': payout_amount,
+            'schedule': schedule
+        })

@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     InitiateContributionView, SquadCallbackView,
     GroupContributionsView, MyContributionsView,
-    RoundSummaryView, GroupPayoutsView
+    RoundSummaryView, GroupPayoutsView, SeedContributionView
 )
 
 # write your urls here
@@ -13,4 +13,6 @@ urlpatterns = [
     path('mine/', MyContributionsView.as_view(), name='my-contributions'),
     path('round-summary/<int:group_id>/', RoundSummaryView.as_view(), name='round-summary'),
     path('payouts/<int:group_id>/', GroupPayoutsView.as_view(), name='group-payouts'),
+
+    path('seed/', SeedContributionView.as_view(), name='seed-contribution'),  
 ]

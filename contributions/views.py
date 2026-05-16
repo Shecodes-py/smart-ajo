@@ -500,14 +500,59 @@ class MakeContributionView(APIView):
                     group.save()
 
 
-class GroupContributionsView(generics.ListAPIView):
-    serializer_class = ContributionSerializer
+class GroupContributionsView(APIView):
+    """GET /api/contributions/group/{group_id}/"""
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        group_id = self.kwargs['group_id']
-        return Contribution.objects.filter(group_id=group_id)
+    def get(self, request, group_id):
+        group = get_object_or_404(Group, pk=group_id)
+        current_round = request.query_params.get('round', group.current_round)
 
+        # All members for this group
+        members = Membership.objects.filter(
+            group=group, is_active=True
+        ).select_related('user')
+
+        contributions = Contribution.objects.filter(
+            group=group,
+            round_number=current_round
+        ).select_related('user')
+
+        # Map user_id → contribution
+        contrib_map = {c.user_id: c for c in contributions}
+
+        result = []
+        for membership in members:
+            user = membership.user
+            contrib = contrib_map.get(user.id)
+
+            result.append({
+                'user_id': user.id,
+                'user_name': user.get_full_name() or user.username,
+                'rotation_order': membership.rotation_order,
+                'round_number': int(current_round),
+                'status': contrib.status if contrib else 'pending',
+                'amount': contrib.amount if contrib else group.contribution_amount,
+                'paid_at': contrib.paid_at if contrib else None,
+                'due_date': contrib.due_date if contrib else None,
+                'risk_level': user.risk_level,
+            })
+
+        # Sort — paid first, then pending, then missed
+        status_order = {'paid': 0, 'late': 1, 'pending': 2, 'missed': 3}
+        result.sort(key=lambda x: status_order.get(x['status'], 99))
+
+        paid_count = sum(1 for r in result if r['status'] in ['paid', 'late'])
+
+        return Response({
+            'group': group.name,
+            'current_round': group.current_round,
+            'total_rounds': group.total_rounds or group.max_members,
+            'round': int(current_round),
+            'paid_count': paid_count,
+            'total_members': len(result),
+            'contributions': result
+        })
 
 class MyContributionsView(generics.ListAPIView):
     serializer_class = ContributionSerializer
@@ -591,3 +636,78 @@ class GroupPayoutsView(generics.ListAPIView):
 
     def get_queryset(self):
         return Payout.objects.filter(group_id=self.kwargs['group_id'])
+
+class SeedContributionView(APIView):
+    """
+    Demo/seeding only — creates paid OR missed contribution records
+    without touching Squad or the wallet.
+
+    POST /api/contributions/seed/
+    Body:
+    {
+        "user_id": 5,
+        "group_id": 3,
+        "round_number": 2,
+        "status": "missed"        # "paid" | "missed" | "late"
+    }
+
+    Remove this endpoint (and its url) before going to production.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user_id     = request.data.get("user_id")
+        group_id    = request.data.get("group_id")
+        round_number = request.data.get("round_number")
+        status_val  = request.data.get("status", "paid")
+
+        # ── Basic validation ──────────────────────────────────
+        if not all([user_id, group_id, round_number]):
+            return Response(
+                {"error": "user_id, group_id, and round_number are all required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if status_val not in ["paid", "missed", "late"]:
+            return Response(
+                {"error": "status must be one of: paid, missed, late."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user  = get_object_or_404(User, pk=user_id)
+        group = get_object_or_404(Group, pk=group_id)
+
+        # ── Must be a member ──────────────────────────────────
+        if not Membership.objects.filter(user=user, group=group, is_active=True).exists():
+            return Response(
+                {"error": f"{user.get_full_name()} is not an active member of {group.name}."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # ── Create or update the contribution record ──────────
+        contribution, created = Contribution.objects.update_or_create(
+            user=user,
+            group=group,
+            round_number=round_number,
+            defaults={
+                "amount":   group.contribution_amount,
+                "status":   status_val,
+                "due_date": timezone.now().date(),
+                "paid_at":  timezone.now() if status_val in ["paid", "late"] else None,
+            }
+        )
+
+        # ── Recalculate this user's risk score ────────────────
+        update_user_risk(user)
+
+        return Response(
+            {
+                "message":      f"Seed record {'created' if created else 'updated'} successfully.",
+                "user":         user.get_full_name(),
+                "group":        group.name,
+                "round_number": round_number,
+                "status":       status_val,
+                "risk_level":   user.risk_level,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
