@@ -14,13 +14,16 @@ def generate_ref(prefix="AJO"):
 
 def initiate_funding(user, amount_naira):
     ref = generate_ref("FUND")
+
+    customer_name = user.get_full_name().strip() or user.username or user.email
+    
     payload = {
         "email": user.email,
         "amount": int(amount_naira * 100),
         "currency": "NGN",
         "initiate_type": "inline",
         "transaction_ref": ref,
-        "customer_name": user.get_full_name(),
+        "customer_name": customer_name,
         "callback_url": settings.SQUAD_WALLET_CALLBACK_URL,
         "metadata": {
             "user_id": user.id,
@@ -45,13 +48,15 @@ def initiate_funding(user, amount_naira):
 def initiate_card_tokenization(user):
     """Charges ₦100 to tokenize card for future payments."""
     ref = generate_ref("CARD")
+    customer_name = user.get_full_name().strip() or user.username or user.email
+    
     payload = {
         "email": user.email,
         "amount": 10000,   # ₦100 in kobo
         "currency": "NGN",
         "initiate_type": "inline",
         "transaction_ref": ref,
-        "customer_name": user.get_full_name(),
+        "customer_name": customer_name,
         "callback_url": settings.SQUAD_CARD_CALLBACK_URL,
         "metadata": {
             "user_id": user.id,
