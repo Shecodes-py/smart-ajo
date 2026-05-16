@@ -218,6 +218,7 @@ DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 SQUAD_SECRET_KEY = os.getenv('SQUAD_SECRET_KEY')
 SQUAD_CALLBACK_URL = os.getenv('SQUAD_CALLBACK_URL')
 SQUAD_REDIRECT_URL = os.getenv('SQUAD_REDIRECT_URL')
+FRONTEND_URL="https://dan-iell.github.io/Smart_Ajo"
 
 # Squad callbacks
 SQUAD_WALLET_CALLBACK_URL = os.getenv('SQUAD_WALLET_CALLBACK_URL')

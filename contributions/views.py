@@ -1,11 +1,13 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import redirect, render, get_object_or_404
 from django.utils import timezone
 from django.db import transaction
+from django.conf import settings
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+
 
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers
@@ -197,9 +199,63 @@ class InitiateContributionView(APIView):
 
 
 class SquadCallbackView(APIView):
-    permission_classes = []  
+    """
+    GET  — Squad redirects the user's browser here after payment
+    POST — Squad sends webhook confirmation (server to server)
+    """
+    permission_classes = []
+
+    def get(self, request):
+        """Browser redirect after Squad checkout."""
+        transaction_ref = request.query_params.get('reference') or \
+                          request.query_params.get('transaction_ref')
+
+        if not transaction_ref:
+            # Redirect to failure page
+            return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
+
+        result = verify_payment(transaction_ref)
+
+        if not result['success'] or result['status'] != 'success':
+            return redirect(
+                f"{settings.FRONTEND_URL}/pages/payment-status.html"
+                f"?status=failed&transaction_ref={transaction_ref}"
+            )
+
+        # Process the payment
+        metadata = result.get('metadata', {})
+        user_id = metadata.get('user_id')
+        group_id = metadata.get('group_id')
+        round_number = metadata.get('round_number')
+
+        try:
+            user = User.objects.get(id=user_id)
+            group = Group.objects.get(id=group_id)
+        except Exception:
+            return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
+
+        contribution = Contribution.objects.filter(
+            user=user, group=group, round_number=round_number
+        ).first()
+
+        if contribution and contribution.status not in ['paid', 'late']:
+            now = timezone.now()
+            contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
+            contribution.paid_at = now
+            contribution.save()
+            update_user_risk(user)
+            self._check_and_process_payout(group, round_number)
+
+        # Redirect to frontend success page
+        return redirect(
+            f"{settings.FRONTEND_URL}/pages/payment-status.html"
+            f"?status=success"
+            f"&transaction_ref={transaction_ref}"
+            f"&group_id={group_id}"
+        )
 
     def post(self, request):
+        """Server-to-server webhook from Squad."""
         # 1. FIX: Squad webhooks wrap data inside a 'Body' object
         body_data = request.data.get('Body', {})
         transaction_ref = body_data.get('transaction_ref') or request.query_params.get('transaction_ref')
@@ -315,6 +371,7 @@ class SquadCallbackView(APIView):
                     else:
                         group.current_round += 1
                     group.save()
+
 
 class MakeContributionView(APIView):
     """User pays their contribution for the current round."""
