@@ -79,7 +79,7 @@ class CreateGroupSerializer(serializers.ModelSerializer):
         model = Group
         fields = [
             'name', 'description', 'contribution_amount', 'is_private',
-            'contribution_frequency', 'max_members', 'start_date'
+            'contribution_frequency', 'max_members', 'start_date', 'duration'
         ]
 
     def validate_max_members(self, value):
