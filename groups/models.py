@@ -32,7 +32,7 @@ class Group(models.Model):
     ]
 
     name = models.CharField(max_length=100, unique=True)
-    code =  models.CharField(max_length=10, unique=True, blank=True)
+    code =  models.CharField(max_length=15, unique=True, blank=True)
     description = models.TextField(blank=True)
     admin = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='admin_groups')
     

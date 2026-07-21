@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'wallets',
     'payments',   
     'notifications',
+    'demo',
 
 ]
 
@@ -231,6 +232,12 @@ CELERY_TIMEZONE = 'Africa/Lagos'
 
 # Celery Beat 
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Monnify Configuration (Demo)
+MONNIFY_API_KEY = os.getenv("MONNIFY_API_KEY", "")
+MONNIFY_SECRET_KEY = os.getenv("MONNIFY_SECRET_KEY", "")
+MONNIFY_CONTRACT_CODE = os.getenv("MONNIFY_CONTRACT_CODE", "")
+MONNIFY_BASE_URL = os.getenv("MONNIFY_BASE_URL", "https://sandbox.monnify.com")
 
 # Cache 
 CACHES = {
