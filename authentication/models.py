@@ -81,7 +81,7 @@ class CustomUser(AbstractUser, PermissionsMixin):
 
 
 class OTP(models.Model):
-    phone_number = models.CharField(max_length=50)
+    phone_number = models.CharField()
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     
