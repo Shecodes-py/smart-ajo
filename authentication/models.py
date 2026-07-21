@@ -37,7 +37,7 @@ class CustomUser(AbstractUser, PermissionsMixin):
     email = models.EmailField(unique=True, max_length=150)
     username = models.CharField(max_length=150, unique=True)
     full_name = models.CharField(max_length=150, blank=True)
-    phone_number = models.CharField(max_length=20, blank=True)
+    phone_number = models.CharField(max_length=50, blank=True)
         
     # profile 
     display_name = models.CharField(max_length=150, blank=True)
@@ -81,7 +81,7 @@ class CustomUser(AbstractUser, PermissionsMixin):
 
 
 class OTP(models.Model):
-    phone_number = models.CharField(max_length=15)
+    phone_number = models.CharField(max_length=20)
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     

@@ -66,3 +66,13 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['full_name', 'email', 'date_of_birth', "avatar", 'phone_number']
+
+    def validate_phone_number(self, value):
+        value = value.strip().replace(' ', '').replace('-', '')
+        if value.startswith('0'):
+            value = '+234' + value[1:]
+        elif not value.startswith('+'):
+            value = '+234' + value
+        if len(value) != 14:
+            raise serializers.ValidationError("Enter a valid Nigerian phone number e.g. 08012345678")
+        return value
