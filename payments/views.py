@@ -6,7 +6,7 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from .models import SavedCard
 from .serializers import SavedCardSerializer
-from wallets.squad import initiate_card_tokenization, verify_transaction
+from wallets.monnify import initiate_card_tokenization, verify_transaction
 
 # Create your views here.
 class AddCardView(APIView):
@@ -30,7 +30,7 @@ class AddCardView(APIView):
 
 
 class CardCallbackView(APIView):
-    """POST /api/payments/card/callback/ — Squad webhook after tokenization"""
+    """POST /api/payments/card/callback/ — Monnify webhook after tokenization"""
     permission_classes = []
 
     def post(self, request):

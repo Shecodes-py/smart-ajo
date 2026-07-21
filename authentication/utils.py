@@ -1,11 +1,13 @@
 import random
 import string
-from django.core.cache import cache
-from django.core.mail import send_mail
+import datetime
+import logging
+
 from django.conf import settings
+from django.utils import timezone
 import resend
 
-import logging
+from .models import OTP  # Ensure the import path matches your app structure
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ def send_email_otp(email, otp):
     subject = "Your Smart Ajo Verification Code"
     html_content = f"""
         <p>Your Smart Ajo verification code is: <strong>{otp}</strong></p>
-        <p>Valid for 10 minutes. Do not share this code with anyone.</p>
+        <p>Valid for 5 minutes. Do not share this code with anyone.</p>
     """
     
     try:
@@ -35,18 +37,41 @@ def send_email_otp(email, otp):
         logger.error(f"Resend Error: {str(e)}")
         return False
 
-def store_otp(email, otp, timeout=600):
-    key = f'otp_{email}'
-    cache.set(key, otp, timeout=timeout)
 
-def verify_otp(email, otp_input):
-    key = f'otp_{email}'
-    stored_otp = cache.get(key)
+def store_otp(identifier, otp):
+    """
+    Stores OTP using the database model. 
+    'identifier' can be a phone number or email address.
+    """
+    OTP.objects.filter(phone_number=identifier).delete()
+    
+    # Save new OTP record
+    OTP.objects.create(
+        phone_number=identifier,
+        code=otp
+    )
 
-    if stored_otp is None:
+
+def verify_otp(identifier, otp_input):
+    """
+    Verifies input code against the latest stored OTP in DB.
+    """
+    otp_record = (
+        OTP.objects.filter(phone_number=identifier)
+        .order_by('-created_at')
+        .first()
+    )
+
+    if not otp_record:
+        return False, "OTP not found. Please request a new one."
+
+    if otp_record.is_expired():
+        otp_record.delete()  # Clean up expired record
         return False, "OTP has expired. Please request a new one."
-    if stored_otp != otp_input:
+
+    if otp_record.code != otp_input:
         return False, "Invalid OTP. Please try again."
 
-    cache.delete(key)
+    # Delete after successful verification (one-time use)
+    otp_record.delete()
     return True, "OTP verified successfully."

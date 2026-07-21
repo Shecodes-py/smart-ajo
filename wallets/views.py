@@ -6,7 +6,7 @@ from rest_framework import status, generics
 from django.conf import settings
 
 from .models import Wallet, WalletTransaction
-from .squad import initiate_funding, initiate_withdrawal, verify_transaction, generate_ref
+from .monnify import initiate_funding, initiate_withdrawal, verify_transaction, generate_ref
 from .serializers import WalletSerializer, WalletTransactionSerializer
 
 # Create your views here.
@@ -23,7 +23,7 @@ class WalletView(APIView):
 
 
 class FundWalletView(APIView):
-    """POST /api/wallet/fund/ — initiates Squad payment to top up wallet"""
+    """POST /api/wallet/fund/ — initiates Monnify payment to top up wallet"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -51,7 +51,7 @@ class FundWalletView(APIView):
             amount=amount,
             status="pending",
             reference=result["transaction_ref"],
-            description="Wallet funding via Squad"
+            description="Wallet funding via Monnify"
         )
 
         return Response({
@@ -61,11 +61,11 @@ class FundWalletView(APIView):
 
 
 class WalletFundCallbackView(APIView):
-    """POST /api/wallet/fund/callback/ — Squad webhook after funding"""
+    """POST /api/wallet/fund/callback/ — Monnify webhook after funding"""
     permission_classes = []
 
     def get(self, request):
-        """Browser redirect after Squad checkout."""
+        """Browser redirect after Monnify checkout."""
         transaction_ref = request.query_params.get('reference') or \
                           request.query_params.get('transaction_ref')
 

@@ -215,15 +215,7 @@ CLOUDINARY_STORAGE = {
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
-# squad api settings
-SQUAD_SECRET_KEY = os.getenv('SQUAD_SECRET_KEY')
-SQUAD_CALLBACK_URL = os.getenv('SQUAD_CALLBACK_URL')
-SQUAD_REDIRECT_URL = os.getenv('SQUAD_REDIRECT_URL')
 FRONTEND_URL="https://dan-iell.github.io/Smart_Ajo"
-
-# Squad callbacks
-SQUAD_WALLET_CALLBACK_URL = os.getenv('SQUAD_WALLET_CALLBACK_URL')
-SQUAD_CARD_CALLBACK_URL = os.getenv('SQUAD_CARD_CALLBACK_URL')
 
 # Redis
 CELERY_BROKER_URL = os.getenv('REDIS_URL', default='redis://localhost:6379/0')
@@ -233,11 +225,13 @@ CELERY_TIMEZONE = 'Africa/Lagos'
 # Celery Beat 
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
-# Monnify Configuration (Demo)
+# Monnify Configuration
 MONNIFY_API_KEY = os.getenv("MONNIFY_API_KEY", "")
 MONNIFY_SECRET_KEY = os.getenv("MONNIFY_SECRET_KEY", "")
 MONNIFY_CONTRACT_CODE = os.getenv("MONNIFY_CONTRACT_CODE", "")
 MONNIFY_BASE_URL = os.getenv("MONNIFY_BASE_URL", "https://sandbox.monnify.com")
+MONNIFY_WALLET_ACCOUNT_NUMBER = os.getenv("MONNIFY_WALLET_ACCOUNT_NUMBER", "")
+MONNIFY_CALLBACK_BASE_URL = os.getenv("MONNIFY_CALLBACK_BASE_URL", "https://smart-ajo.onrender.com")
 
 # Cache 
 CACHES = {

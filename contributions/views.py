@@ -16,7 +16,7 @@ from groups.models import Group, Membership
 from .models import Contribution, Payout
 from .serializers import ContributionSerializer, PayoutSerializer
 from .risks import update_user_risk
-from .squad import initiate_payment, verify_payment, parse_transaction_ref
+from .monnify import initiate_payment, verify_payment, parse_transaction_ref
 from wallets.models import Wallet, WalletTransaction
 from notifications.utils import notify, notify_group
 
@@ -48,13 +48,13 @@ logger = logging.getLogger(__name__)
 class InitiateContributionView(APIView):
     """
     Step 1 — user hits this endpoint to start payment.
-    Returns a Squad checkout URL they visit to pay or handles immediate wallet deduction.
+    Returns a Monnify checkout URL they visit to pay or handles immediate wallet deduction.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, group_id):
         group = get_object_or_404(Group, pk=group_id)
-        method = request.query_params.get("method", "squad") 
+        method = request.query_params.get("method", "monnify") 
 
         membership = Membership.objects.filter(
             user=request.user, group=group, is_active=True
@@ -75,7 +75,7 @@ class InitiateContributionView(APIView):
         if already_paid:
             return Response({"error": f"You have already paid for round {group.current_round}."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if method == "squad":
+        if method == "monnify":
             result = initiate_payment(request.user, group, group.contribution_amount)
             if not result['success']:
                 return Response({"error": result['error']}, status=status.HTTP_502_BAD_GATEWAY)
@@ -202,38 +202,37 @@ class InitiateContributionView(APIView):
                     group.save()
 
 
-class SquadCallbackView(APIView):
+class MonnifyCallbackView(APIView):
     """
-    GET  — Squad redirects the user's browser here after payment
-    POST — Squad sends webhook confirmation (server to server)
+    GET  — Monnify redirects the user's browser here after payment
+    POST — Monnify sends webhook confirmation (server to server)
     """
     permission_classes = []
 
     def get(self, request):
-        """Browser redirect after Squad checkout."""
-        transaction_ref = request.query_params.get('reference') or \
+        """Browser redirect after Monnify checkout."""
+        transaction_ref = request.query_params.get('transactionReference') or \
                           request.query_params.get('transaction_ref')
-        
-        logger.info(f"Received GET callback from Squad with transaction_ref: {transaction_ref}")
+
+        logger.info(f"Received GET callback from Monnify with ref: {transaction_ref}")
 
         if not transaction_ref:
-            logger.warning("No transaction_ref found in GET callback from Squad.")
-            # Redirect to failure page
+            logger.warning("No transactionReference found in GET callback from Monnify.")
             return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
 
         result = verify_payment(transaction_ref)
-        logger.info(f"Verification result for transaction_ref {transaction_ref}: {result}")
+        logger.info(f"Verification result for {transaction_ref}: {result}")
 
         if not result['success'] or result['status'] != 'success':
-            logger.warning(f"Payment verification failed for transaction_ref: {transaction_ref}. Result: {result}")
             return redirect(
                 f"{settings.FRONTEND_URL}/pages/payment-status.html"
                 f"?status=failed&transaction_ref={transaction_ref}"
             )
-        logger.info(f"Payment verified successfully for transaction_ref: {transaction_ref}")
 
-        # Process the payment
-        parsed = parse_transaction_ref(transaction_ref)
+        payment_ref = result.get('payment_reference', transaction_ref)
+        parsed = parse_transaction_ref(payment_ref)
+        if not parsed:
+            parsed = parse_transaction_ref(transaction_ref)
         if not parsed:
             return Response({"error": "Invalid transaction ref format."}, status=400)
 
@@ -245,7 +244,6 @@ class SquadCallbackView(APIView):
             user = User.objects.get(id=user_id)
             group = Group.objects.get(id=group_id)
         except Exception:
-            logger.error(f"User or Group not found for transaction_ref: {transaction_ref}. user_id: {user_id}, group_id: {group_id}")
             return redirect(f"{settings.FRONTEND_URL}/pages/payment-status.html?status=failed")
 
         contribution = Contribution.objects.filter(
@@ -260,7 +258,6 @@ class SquadCallbackView(APIView):
             update_user_risk(user)
             self._check_and_process_payout(group, round_number)
 
-        # Redirect to frontend success page
         return redirect(
             f"{settings.FRONTEND_URL}/pages/payment-status.html"
             f"?status=success"
@@ -269,15 +266,19 @@ class SquadCallbackView(APIView):
         )
 
     def post(self, request):
-        """Server-to-server webhook from Squad."""
-        # 1. FIX: Squad webhooks wrap data inside a 'Body' object
-        body_data = request.data.get('Body', {})
-        transaction_ref = body_data.get('transaction_ref') or request.query_params.get('transaction_ref')
+        """Server-to-server webhook from Monnify."""
+        event_type = request.data.get('eventType', '')
+        event_data = request.data.get('eventData', {})
+
+        if event_type not in ('SUCCESSFUL_TRANSACTION',):
+            return Response({"message": f"Ignored event: {event_type}"}, status=status.HTTP_200_OK)
+
+        transaction_ref = event_data.get('transactionReference', '')
+        payment_ref = event_data.get('product', {}).get('reference', '')
 
         if not transaction_ref:
-            return Response({"error": "No transaction ref provided."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "No transaction reference in webhook."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Call Squad's API to verify this transaction status independently
         result = verify_payment(transaction_ref)
 
         if not result['success']:
@@ -286,29 +287,22 @@ class SquadCallbackView(APIView):
         if result['status'] != 'success':
             return Response({"message": "Payment was not successful."}, status=status.HTTP_200_OK)
 
-        parsed = parse_transaction_ref(transaction_ref)
+        ref_to_parse = payment_ref or result.get('payment_reference', transaction_ref)
+        parsed = parse_transaction_ref(ref_to_parse)
         if not parsed:
-            return Response({"error": "Invalid transaction ref format."}, status=400)
+            parsed = parse_transaction_ref(transaction_ref)
+        if not parsed:
+            return Response({"error": "Could not parse transaction reference."}, status=status.HTTP_400_BAD_REQUEST)
 
         user_id = parsed['user_id']
         group_id = parsed['group_id']
         round_number = parsed['round_number']
 
         try:
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            user = User.objects.get(id=user_id)
-            group = Group.objects.get(id=group_id)
-        except Exception:
-            return Response({"error": "User or group not found."}, status=404)
-
-        # 3. Consolidating database processing into a single atomic block
-        try:
             with transaction.atomic():
-                user = User.objects.get(id=user_id)
-                # Lock the group row to safely manage current_round state mutations
+                user = User.objects.select_for_update().get(id=user_id)
                 group = Group.objects.select_for_update().get(id=group_id)
-                
+
                 contribution = Contribution.objects.filter(
                     user=user, group=group, round_number=round_number
                 ).first()
@@ -316,17 +310,14 @@ class SquadCallbackView(APIView):
                 if not contribution:
                     return Response({"error": "Contribution record not found."}, status=status.HTTP_404_NOT_FOUND)
 
-                # Idempotency safety: Stop processing if already paid
                 if contribution.status in ['paid', 'late']:
                     return Response({"message": "Payment already processed previously."}, status=status.HTTP_200_OK)
 
-                # Record contribution status
                 now = timezone.now()
                 contribution.status = 'late' if now.date() > contribution.due_date else 'paid'
                 contribution.paid_at = now
                 contribution.save()
 
-                # Trigger notifications and risk calculations
                 notify(
                     user,
                     'payment_received',
@@ -334,8 +325,7 @@ class SquadCallbackView(APIView):
                     f'Your ₦{contribution.amount:,.0f} contribution to {group.name} (Round {round_number}) was received.'
                 )
                 update_user_risk(user)
-                
-                # Check if this contribution closes the round and triggers an Ajo payout
+
                 self._check_and_process_payout(group, round_number)
 
         except (User.DoesNotExist, Group.DoesNotExist):
@@ -640,7 +630,7 @@ class GroupPayoutsView(generics.ListAPIView):
 class SeedContributionView(APIView):
     """
     Demo/seeding only — creates paid OR missed contribution records
-    without touching Squad or the wallet.
+    without touching the wallet.
 
     POST /api/contributions/seed/
     Body:

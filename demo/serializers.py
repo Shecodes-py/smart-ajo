@@ -24,13 +24,13 @@ class DemoMemberSerializer(serializers.Serializer):
     status = serializers.CharField()
     payout_position = serializers.IntegerField()
     is_current_winner = serializers.BooleanField(default=False)
-    monnify_account_number = serializers.CharField(default="")
-    monnify_bank_name = serializers.CharField(default="")
-    monnify_account_name = serializers.CharField(default="")
-    offline_payin_code = serializers.CharField(default="")
+    monnify_account_number = serializers.CharField(default="", allow_blank=True)
+    monnify_bank_name = serializers.CharField(default="", allow_blank=True)
+    monnify_account_name = serializers.CharField(default="", allow_blank=True)
+    offline_payin_code = serializers.CharField(default="", allow_blank=True)
     days_overdue = serializers.IntegerField(default=0)
     kyc_verified = serializers.BooleanField(default=False)
-    bvn_match = serializers.CharField(default="")
+    bvn_match = serializers.CharField(default="", allow_blank=True)
 
 
 class DemoGroupDataSerializer(serializers.Serializer):
